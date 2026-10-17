@@ -156,4 +156,43 @@ int tlv_next(tlv_it *it, tlv_el *out);                         /* 1 = got a chil
 int tlv_get(const tlv_el *container, uint32_t tag, tlv_el *out); /* find child by context tag */
 uint64_t tlv_get_u(const tlv_el *container, uint32_t tag, uint64_t def); /* int field or default */
 
+/* ---------------------------------------------------------------- crypto */
+/* Matter fixes one cipher suite: P-256 ECC, SHA-256, HMAC/HKDF/PBKDF2 over
+ * SHA-256 and AES-128-CCM with a 16-byte tag. OpenSSL does the primitives;
+ * SPAKE2+ (used by PASE) is assembled here from raw EC point math. */
+
+/* A P-256 key pair in raw form: 32-byte scalar + 65-byte uncompressed point
+ * (0x04 || X || Y). Matter puts public keys on the wire in this format. */
+typedef struct { uint8_t priv[32]; uint8_t pub[65]; } p256_key;
+
+void crypto_init(void);
+void sha256(const void *d, size_t n, uint8_t out[32]);
+void hmac_sha256(const uint8_t *key, size_t kl, const void *d, size_t n, uint8_t out[32]);
+/* HKDF (RFC 5869). Matter uses this for nearly every key derivation; 'info'
+ * is a short ASCII label such as "SessionKeys" or "Sigma2". */
+int hkdf_sha256(const uint8_t *salt, size_t sl, const uint8_t *ikm, size_t il,
+                const char *info, uint8_t *out, size_t outl);
+/* AES-128-CCM, 13-byte nonce, 16-byte tag (Matter's only AEAD). */
+int aes_ccm_encrypt(const uint8_t key[16], const uint8_t nonce[13], const uint8_t *aad, size_t al,
+                    const uint8_t *pt, size_t n, uint8_t *ct, uint8_t tag[16]);
+int aes_ccm_decrypt(const uint8_t key[16], const uint8_t nonce[13], const uint8_t *aad, size_t al,
+                    const uint8_t *ct, size_t n, uint8_t *pt, const uint8_t tag[16]);
+int p256_keygen(p256_key *k);
+int p256_from_priv(p256_key *k);                 /* fills k->pub from k->priv */
+int p256_from_der(const uint8_t *der, size_t n, p256_key *k);
+/* ECDSA over SHA-256(msg). Signatures are raw 64 bytes r||s (not DER). */
+int p256_sign(const p256_key *k, const void *msg, size_t n, uint8_t sig[64]);
+int p256_verify(const uint8_t pub[65], const void *msg, size_t n, const uint8_t sig[64]);
+int p256_ecdh(const p256_key *k, const uint8_t peer[65], uint8_t secret[32]);
+int p256_csr(const p256_key *k, uint8_t *out, size_t *outlen);  /* PKCS#10, DER */
+
+/* SPAKE2+ (verifier side only)
+ * The device is the "verifier": it never needs the passcode itself, only the
+ * verifier (w0, L) derived from it. See crypto.c for the full math. */
+int spake_verifier(uint32_t passcode, const uint8_t *salt, size_t sl, uint32_t iters,
+                   uint8_t w0[32], uint8_t L[65]);
+int spake_respond(const uint8_t w0[32], const uint8_t L[65], const uint8_t context[32],
+                  const uint8_t X[65], uint8_t Y[65], uint8_t cB[32], uint8_t cA_expected[32],
+                  uint8_t Ke[16]);
+
 #endif
