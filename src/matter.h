@@ -202,4 +202,10 @@ int spake_respond(const uint8_t w0[32], const uint8_t L[65], const uint8_t conte
 extern const uint8_t creds_dac_cert[], creds_dac_key[], creds_pai_cert[], creds_cd[];
 extern const size_t creds_dac_cert_len, creds_dac_key_len, creds_pai_cert_len, creds_cd_len;
 
+/* --------------------------------------------------------- setup payload */
+/* The strings a user types / scans to start commissioning. */
+
+void setup_qr(char out[32], uint16_t vid, uint16_t pid, uint8_t caps, uint16_t disc, uint32_t pin);
+void setup_manual(char out[12], uint16_t disc, uint32_t pin);
+
 #endif
