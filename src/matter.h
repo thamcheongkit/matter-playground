@@ -202,6 +202,101 @@ int spake_respond(const uint8_t w0[32], const uint8_t L[65], const uint8_t conte
 extern const uint8_t creds_dac_cert[], creds_dac_key[], creds_pai_cert[], creds_cd[];
 extern const size_t creds_dac_cert_len, creds_dac_key_len, creds_pai_cert_len, creds_cd_len;
 
+/* --------------------------------------------------------------- fabrics */
+/* A *fabric* is one administrative domain (e.g. "Apple Home", "Google Home").
+ * It is defined by a root CA public key + a 64-bit fabric ID. Within it we
+ * have a 64-bit node ID and a certificate (NOC) proving it. A device can be
+ * on several fabrics at once ("multi-admin"); each gets a local 1-byte
+ * *fabric index*, which is what other structures refer to. */
+
+#define MAX_FABRICS   5
+#define MAX_CERT      400               /* Matter TLV certs are at most 400 bytes */
+#define MAX_ACL_BYTES 1024
+#define MAX_ACL_ENTRIES 4
+
+typedef struct {
+    int in_use, committed;    /* committed = CommissioningComplete received */
+    uint8_t index;            /* local fabric index (1..254) */
+    uint8_t rcac[MAX_CERT]; size_t rcac_len;   /* Root CA cert (Matter TLV format) */
+    uint8_t icac[MAX_CERT]; size_t icac_len;   /* optional Intermediate CA cert */
+    uint8_t noc[MAX_CERT];  size_t noc_len;    /* our Node Operational Certificate */
+    uint8_t root_pub[65];
+    uint64_t fabric_id, node_id;
+    uint8_t cfid[8];          /* compressed fabric id */
+    uint8_t ipk_epoch[16];    /* as received in AddNOC */
+    uint8_t ipk[16];          /* derived operational group key */
+    p256_key opkey;           /* operational key pair */
+    uint16_t vendor_id;       /* vendor of the admin that added the fabric */
+    char label[33];
+    uint8_t acl[MAX_ACL_BYTES]; size_t acl_len;   /* concatenated ACL entry structs */
+} fabric_t;
+
+int cert_parse(const uint8_t *cert, size_t n, uint8_t pub[65], uint64_t *node_id,
+               uint64_t *fabric_id, uint32_t cats[3]);
+int fabric_derive(fabric_t *f);        /* compute root_pub/ids/cfid/ipk from certs */
+fabric_t *fabric_by_index(uint8_t idx);
+int fabric_count(int committed_only);
+void fabric_remove(uint8_t idx);
+int state_load(void);
+int state_save(void);
+
+/* ----------------------------------------------------------------- node */
+/* All device-wide state lives in one global, g_node (defined in main.c). */
+
+typedef struct {
+    /* configuration */
+    uint16_t vid, pid, discriminator; /* discriminator: 12-bit id that lets a commissioner
+                                         pick *this* device among several advertising */
+    uint32_t passcode;                /* the setup PIN (27 bits) */
+    char ifname[32];
+    char state_path[256];
+    char host[13];                    /* mDNS host name (12 hex chars) */
+    char instance[17];                /* commissionable instance name */
+    p256_key dac_key;                 /* Device Attestation key (signs attestation + CSR) */
+    uint64_t boot_ms;
+    uint32_t reboot_count;
+
+    /* PASE verifier for the default passcode */
+    uint8_t def_salt[32]; uint32_t def_iters; uint8_t def_w0[32], def_L[65];
+
+    /* commissioning window: when open, PASE is allowed and we advertise
+     * _matterc._udp. "Basic" uses our own passcode; "enhanced" (ECM) uses a
+     * verifier supplied by an existing admin to add a second ecosystem. */
+    int cw_open, cw_enhanced;
+    uint64_t cw_deadline;             /* 0 = never */
+    uint8_t cw_w0[32], cw_L[65], cw_salt[32]; size_t cw_salt_len; uint32_t cw_iters;
+    uint16_t cw_disc;
+    uint8_t cw_admin_fabric; uint16_t cw_admin_vid;
+
+    /* fabrics */
+    fabric_t fabrics[MAX_FABRICS];
+    uint8_t next_fabric_index;
+
+    /* fail-safe context: commissioning changes are provisional until
+     * CommissioningComplete; if the timer runs out they are rolled back. */
+    int fs_armed; uint64_t fs_deadline; uint8_t fs_armed_by;   /* fabric index, 0 = PASE */
+    int fs_have_root; uint8_t fs_root[MAX_CERT]; size_t fs_root_len;
+    int fs_have_csr; p256_key fs_csr_key;
+    uint8_t fs_added_fabric;
+    uint64_t breadcrumb;              /* opaque progress marker the commissioner may store */
+    uint8_t regulatory;
+    uint8_t pending_remove;           /* RemoveFabric, applied after the response is sent */
+
+    /* application */
+    int onoff;
+    uint64_t identify_end;
+    char node_label[33];
+    char location[3];
+} node_t;
+
+extern node_t g_node;
+
+void cw_open_basic(void);
+void cw_close(void);
+void failsafe_expire(void);
+void node_tick(uint64_t now);
+void light_set(int on, const char *why);
+
 /* --------------------------------------------------------- setup payload */
 /* The strings a user types / scans to start commissioning. */
 
