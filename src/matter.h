@@ -297,6 +297,66 @@ void failsafe_expire(void);
 void node_tick(uint64_t now);
 void light_set(int on, const char *why);
 
+/* ------------------------------------------------------------- transport */
+/* The message layer. Every datagram is:
+ *
+ *   [message header][protocol header][payload]          unsecured session
+ *   [message header]{protocol header payload}[MIC]      secure session
+ *                    \_____ AES-CCM encrypted _____/
+ *
+ * A *session* is a pair of keys shared with one peer (from PASE or CASE).
+ * Session id 0 means "unsecured" and is only used for the handshakes.
+ * An *exchange* is a request/response conversation inside a session,
+ * identified by a 16-bit exchange id chosen by the initiator. */
+
+#define MATTER_PORT 5540
+#define MAX_UDP 1232            /* IPv6 minimum MTU minus headers */
+
+enum { SESS_PASE = 1, SESS_CASE = 2 };
+
+typedef struct session {
+    int in_use, type;
+    uint16_t local_id, peer_id;       /* we receive on local_id, send to peer_id */
+    uint8_t enc_key[16], dec_key[16], att_challenge[16];
+    uint32_t tx_counter;              /* per-session message counter (nonce + replay protection) */
+    uint32_t rx_max, rx_bitmap; int rx_init;   /* replay window for received counters */
+    uint64_t local_node, peer_node;   /* operational node ids (0 for PASE) */
+    uint8_t fabric_idx;
+    uint32_t peer_cats[3];            /* CASE Authenticated Tags from the peer's NOC */
+    struct sockaddr_in6 peer;         /* last address we heard from (peers may roam) */
+    uint64_t last_used;
+} session_t;
+
+/* Everything a protocol handler needs to know about one received message,
+ * and enough context to reply on the same exchange. */
+typedef struct {
+    session_t *sess;                  /* NULL = unsecured session */
+    struct sockaddr_in6 from;
+    int has_src; uint64_t src_node;   /* unsecured: initiator's ephemeral node id */
+    uint16_t exchange_id;
+    int peer_is_initiator;
+    uint16_t protocol;
+    uint8_t opcode;
+    uint32_t counter;
+    int needs_ack, acked;             /* MRP: peer asked for an ack / we already sent one */
+    const uint8_t *payload; size_t len;
+} rx_ctx;
+
+int transport_init(void);
+int transport_fd(void);
+void transport_rx(void);
+void transport_tick(uint64_t now);
+/* reply on the exchange of 'rx' (piggybacks the ack if one is owed) */
+int reply(rx_ctx *rx, uint16_t proto, uint8_t opcode, const uint8_t *p, size_t n, int reliable);
+/* start a new exchange as initiator (used for subscription reports) */
+int send_initiate(session_t *s, uint16_t exch, uint16_t proto, uint8_t opcode,
+                  const uint8_t *p, size_t n);
+uint16_t new_exchange_id(void);
+uint16_t new_session_id(void);
+session_t *session_new(int type);
+void session_free(session_t *s);
+void sessions_drop_fabric(uint8_t fabric_idx);
+
 /* --------------------------------------------------------- setup payload */
 /* The strings a user types / scans to start commissioning. */
 
