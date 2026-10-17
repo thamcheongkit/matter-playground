@@ -368,6 +368,18 @@ void sessions_drop_fabric(uint8_t fabric_idx);
 void secure_channel_rx(rx_ctx *rx);
 void send_status_report(rx_ctx *rx, uint16_t general, uint16_t code);
 
+/* ------------------------------------------------------------------ mDNS */
+/* DNS-SD over multicast DNS: how controllers discover us on the LAN. */
+
+int mdns_init(const char *ifname);
+int mdns_fd4(void);
+int mdns_fd6(void);
+void mdns_rx(int fd);
+void mdns_announce(void);             /* (re)announce everything; call after state changes */
+void mdns_goodbye_commissionable(void);
+void mdns_goodbye_all(void);
+void mdns_tick(uint64_t now);
+
 /* --------------------------------------------------------- setup payload */
 /* The strings a user types / scans to start commissioning. */
 
