@@ -195,4 +195,11 @@ int spake_respond(const uint8_t w0[32], const uint8_t L[65], const uint8_t conte
                   const uint8_t X[65], uint8_t Y[65], uint8_t cB[32], uint8_t cA_expected[32],
                   uint8_t Ke[16]);
 
+/* ----------------------------------------------------------------- creds */
+/* Factory credentials ("device attestation"). Real products get a unique DAC
+ * from their manufacturer's PKI; we embed the public test set (creds.c). */
+
+extern const uint8_t creds_dac_cert[], creds_dac_key[], creds_pai_cert[], creds_cd[];
+extern const size_t creds_dac_cert_len, creds_dac_key_len, creds_pai_cert_len, creds_cd_len;
+
 #endif
