@@ -1,0 +1,49 @@
+name: macOS build
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-latest   # Apple Silicon (arm64)
+    permissions:
+      contents: write       # needed to create the release on tag pushes
+    env:
+      PKG: matter-light-macos-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install OpenSSL
+        run: brew install openssl@3
+
+      # Override LDLIBS to link libcrypto statically, so the binary doesn't need Homebrew at runtime.
+      - name: Build
+        run: make LDLIBS="$(brew --prefix openssl@3)/lib/libcrypto.a"
+
+      - name: Check no dynamic OpenSSL dependency
+        run: |
+          otool -L matter-light
+          if otool -L matter-light | grep -qE 'libcrypto|libssl'; then
+            echo "matter-light still links OpenSSL dynamically" >&2
+            exit 1
+          fi
+
+      - name: Package
+        run: |
+          mkdir "$PKG"
+          cp matter-light README.md "$PKG/"
+          tar czf "$PKG.tar.gz" "$PKG"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PKG }}
+          path: ${{ env.PKG }}.tar.gz
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" "$PKG.tar.gz" --title "$GITHUB_REF_NAME" --generate-notes
