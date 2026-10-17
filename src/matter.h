@@ -368,6 +368,73 @@ void sessions_drop_fabric(uint8_t fabric_idx);
 void secure_channel_rx(rx_ctx *rx);
 void send_status_report(rx_ctx *rx, uint16_t general, uint16_t code);
 
+/* ------------------------------------------------------ interaction model */
+/* IM status codes (Matter "Status" enum) returned for reads/writes/commands. */
+
+enum {
+    ST_SUCCESS = 0x00, ST_FAILURE = 0x01, ST_INVALID_SUBSCRIPTION = 0x7D,
+    ST_UNSUPPORTED_ACCESS = 0x7E, ST_UNSUPPORTED_ENDPOINT = 0x7F, ST_INVALID_ACTION = 0x80,
+    ST_UNSUPPORTED_COMMAND = 0x81, ST_INVALID_COMMAND = 0x85, ST_UNSUPPORTED_ATTRIBUTE = 0x86,
+    ST_CONSTRAINT_ERROR = 0x87, ST_UNSUPPORTED_WRITE = 0x88, ST_RESOURCE_EXHAUSTED = 0x89,
+    ST_NOT_FOUND = 0x8B, ST_INVALID_DATA_TYPE = 0x8D, ST_DATA_VERSION_MISMATCH = 0x92,
+    ST_BUSY = 0x9C, ST_UNSUPPORTED_CLUSTER = 0xC3, ST_FAILSAFE_REQUIRED = 0xCA,
+};
+
+/* Who is accessing: the session, its fabric, and whether the request wants
+ * fabric-scoped lists filtered to that fabric only. */
+typedef struct {
+    session_t *sess;
+    uint8_t fabric_idx;               /* accessing fabric (0 = none) */
+    int fabric_filtered;
+} im_ctx;
+
+/* Context passed to a cluster's command handler. A handler either:
+ *   - returns a status code (engine encodes a CommandStatusIB), or
+ *   - calls cmd_resp_begin()/cmd_resp_end() to send a response command. */
+typedef struct {
+    im_ctx im;
+    uint16_t ep; uint32_t cl, cmd;
+    tlv_w *w;
+    int has_ref; uint16_t ref;
+    int responded;
+    int cluster_status;               /* -1 = none */
+} cmd_ctx;
+
+tlv_w *cmd_resp_begin(cmd_ctx *c, uint32_t resp_cmd);
+void cmd_resp_end(cmd_ctx *c);
+
+/* How a cluster plugs into the engine: its id, revision, feature bits, the
+ * attribute/command ids it supports, and callbacks. The engine handles the
+ * "global" attributes (revision, feature map, attribute/command lists) itself
+ * from these tables. Each callback writes/reads TLV with the given tag. */
+typedef struct cluster_def {
+    uint32_t id; uint16_t rev; uint32_t features;
+    const uint32_t *attrs; int nattrs;     /* cluster-specific attribute ids */
+    const uint32_t *acmds; int nacmds;     /* accepted (client -> server) commands */
+    const uint32_t *gcmds; int ngcmds;     /* generated (response) commands */
+    int (*read)(const im_ctx *c, uint16_t ep, uint32_t attr, tlv_w *w, uint32_t tag);
+    int (*write)(const im_ctx *c, uint16_t ep, uint32_t attr, const tlv_el *v, int append);
+    int (*invoke)(cmd_ctx *c, const tlv_el *fields);
+} cluster_def;
+
+typedef struct {
+    uint16_t id;
+    const cluster_def *const *clusters; int nclusters;
+} endpoint_def;
+
+extern const endpoint_def g_endpoints[];
+extern const int g_nendpoints;
+
+const cluster_def *find_cluster(uint16_t ep, uint32_t cl, int *status);
+uint32_t *data_version(uint16_t ep, uint32_t cl);
+/* call after any attribute changes: bumps the cluster's DataVersion and queues
+ * a report for every subscription covering that cluster */
+void im_mark_dirty(uint16_t ep, uint32_t cl);
+void im_rx(rx_ctx *rx);
+void im_tick(uint64_t now);
+void im_on_send_failed(session_t *s, uint16_t exch);
+void im_drop_session(session_t *s);
+
 /* ------------------------------------------------------------------ mDNS */
 /* DNS-SD over multicast DNS: how controllers discover us on the LAN. */
 
