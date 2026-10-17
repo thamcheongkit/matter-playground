@@ -357,6 +357,17 @@ session_t *session_new(int type);
 void session_free(session_t *s);
 void sessions_drop_fabric(uint8_t fabric_idx);
 
+/* --------------------------------------------------------- secure channel */
+/* Protocol IDs select which handler gets a message. Secure Channel (0)
+ * carries handshakes, acks and status reports; Interaction Model (1) carries
+ * the actual data-model traffic. */
+
+#define PROTO_SECURE_CHANNEL 0x0000
+#define PROTO_IM             0x0001
+
+void secure_channel_rx(rx_ctx *rx);
+void send_status_report(rx_ctx *rx, uint16_t general, uint16_t code);
+
 /* --------------------------------------------------------- setup payload */
 /* The strings a user types / scans to start commissioning. */
 
