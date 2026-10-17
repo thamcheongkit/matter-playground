@@ -1,0 +1,4 @@
+build/
+matter-light
+*.state
+*.state.tmp
