@@ -100,4 +100,60 @@ static inline uint16_t get_le16(const uint8_t *p) { return p[0] | (p[1] << 8); }
 static inline uint32_t get_le32(const uint8_t *p) { return p[0] | (p[1] << 8) | (p[2] << 16) | ((uint32_t)p[3] << 24); }
 static inline uint64_t get_le64(const uint8_t *p) { return get_le32(p) | ((uint64_t)get_le32(p + 4) << 32); }
 
+/* ------------------------------------------------------------------- TLV */
+/* TLV (Tag-Length-Value) is Matter's binary serialization, a bit like a
+ * compact CBOR. Every Interaction Model message, every handshake message and
+ * even Matter certificates are TLV. Each element = control byte (tag form +
+ * type), optional tag bytes, optional length, value. See tlv.c for details.
+ *
+ * Tags: in Matter payloads you almost only see two kinds:
+ *   - anonymous   (no tag)   — top-level structs, array items
+ *   - context tag (0..255)   — struct fields, meaning depends on the schema
+ * We represent "anonymous" as TLV_ANON and any profile tag as TLV_OTHER. */
+
+#define TLV_ANON  0xFFFFFFFFu   /* anonymous tag */
+#define TLV_OTHER 0xFFFFFFFEu   /* profile tag (unsupported, parsed and ignored) */
+
+/* Normalised element types (the wire has several widths per type). */
+enum { TLV_T_INT, TLV_T_UINT, TLV_T_BOOL, TLV_T_FLOAT, TLV_T_UTF8, TLV_T_BYTES,
+       TLV_T_NULL, TLV_T_STRUCT, TLV_T_ARRAY, TLV_T_LIST, TLV_T_END };
+
+/* Writer: appends into a caller-provided buffer. On overflow it sets err and
+ * stops writing, so callers can emit a whole message and check err once. */
+typedef struct { uint8_t *buf; size_t cap, len; int err; } tlv_w;
+
+/* A parsed element. Parsing is zero-copy: p/raw point into the input. */
+typedef struct {
+    int type;
+    uint32_t tag;
+    uint64_t u;              /* unsigned / bool value */
+    int64_t i;               /* signed value */
+    const uint8_t *p;        /* string data, or container contents (without end marker) */
+    size_t n;
+    const uint8_t *raw;      /* the whole encoded element */
+    size_t rawlen;
+} tlv_el;
+
+/* Iterator over the direct children of a container element. */
+typedef struct { const uint8_t *p, *end; } tlv_it;
+
+void tlv_w_init(tlv_w *w, uint8_t *buf, size_t cap);
+void tlv_put_uint(tlv_w *w, uint32_t tag, uint64_t v);
+void tlv_put_int(tlv_w *w, uint32_t tag, int64_t v);
+void tlv_put_bool(tlv_w *w, uint32_t tag, int v);
+void tlv_put_null(tlv_w *w, uint32_t tag);
+void tlv_put_bytes(tlv_w *w, uint32_t tag, const void *p, size_t n);
+void tlv_put_str(tlv_w *w, uint32_t tag, const char *s);
+void tlv_start(tlv_w *w, uint32_t tag, int type);   /* open struct/array/list ... */
+void tlv_end(tlv_w *w);                              /* ... and close it */
+void tlv_put_raw(tlv_w *w, const void *p, size_t n); /* splice pre-encoded TLV */
+/* copy an element, replacing its tag (only for elements whose tag is anonymous or context) */
+void tlv_put_retag(tlv_w *w, uint32_t tag, const tlv_el *e);
+
+int tlv_parse(const uint8_t *p, size_t n, tlv_el *out);       /* parse one element; 0 = ok */
+void tlv_iter(tlv_it *it, const tlv_el *container);
+int tlv_next(tlv_it *it, tlv_el *out);                         /* 1 = got a child, 0 = done */
+int tlv_get(const tlv_el *container, uint32_t tag, tlv_el *out); /* find child by context tag */
+uint64_t tlv_get_u(const tlv_el *container, uint32_t tag, uint64_t def); /* int field or default */
+
 #endif
